@@ -1,6 +1,7 @@
 package bz.rxla.audioplayer;
 
 import android.content.Context;
+import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Build;
@@ -12,7 +13,6 @@ import androidx.annotation.NonNull;
 import java.io.IOException;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
-import io.flutter.plugin.common.BinaryMessenger;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
@@ -28,6 +28,15 @@ public class AudioplayerPlugin implements FlutterPlugin, MethodCallHandler {
   private final Handler handler = new Handler();
   private MediaPlayer mediaPlayer;
 
+  @Override
+  public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
+    channel = new MethodChannel(flutterPluginBinding.getFlutterEngine().getDartExecutor(), ID);
+    channel.setMethodCallHandler(this);
+
+    Context context = flutterPluginBinding.getApplicationContext();
+    this.am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+  }
+
   // This static function is optional and equivalent to onAttachedToEngine. It supports the old
   // pre-Flutter-1.12 Android projects. You are encouraged to continue supporting
   // plugin registration via this function while apps migrate to use the new Android APIs
@@ -38,14 +47,8 @@ public class AudioplayerPlugin implements FlutterPlugin, MethodCallHandler {
   // depending on the user's project. onAttachedToEngine or registerWith must both be defined
   // in the same class.
   public static void registerWith(Registrar registrar) {
-    AudioplayerPlugin instance = new AudioplayerPlugin();
-    instance.initInstance(registrar.messenger(), registrar.context());
-  }
-
-  private void initInstance(BinaryMessenger binaryMessenger, Context context) {
-    channel = new MethodChannel(binaryMessenger, ID);
-    channel.setMethodCallHandler(this);
-    am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+    final MethodChannel channel = new MethodChannel(registrar.messenger(), "audioplayer");
+    channel.setMethodCallHandler(new AudioplayerPlugin());
   }
 
   @Override
@@ -111,7 +114,14 @@ public class AudioplayerPlugin implements FlutterPlugin, MethodCallHandler {
   private void play(String url) {
     if (mediaPlayer == null) {
       mediaPlayer = new MediaPlayer();
-      mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        mediaPlayer.setAudioAttributes(new AudioAttributes
+                .Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build());
+      }else{
+        mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+      }
 
       try {
         mediaPlayer.setDataSource(url);
@@ -120,6 +130,7 @@ public class AudioplayerPlugin implements FlutterPlugin, MethodCallHandler {
         channel.invokeMethod("audio.onError", "Invalid Datasource");
         return;
       }
+
       mediaPlayer.prepareAsync();
 
       mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener(){
@@ -137,6 +148,7 @@ public class AudioplayerPlugin implements FlutterPlugin, MethodCallHandler {
           channel.invokeMethod("audio.onComplete", null);
         }
       });
+
       mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener(){
         @Override
         public boolean onError(MediaPlayer mp, int what, int extra) {
@@ -152,15 +164,8 @@ public class AudioplayerPlugin implements FlutterPlugin, MethodCallHandler {
   }
 
   @Override
-  public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
-    initInstance(binding.getBinaryMessenger(), binding.getApplicationContext());
-  }
-
-  @Override
   public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
     channel.setMethodCallHandler(null);
-    channel = null;
-    am = null;
   }
 
   private final Runnable sendData = new Runnable(){
